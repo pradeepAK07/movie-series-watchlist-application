@@ -1,41 +1,48 @@
 import React, { useState } from 'react';
-import { Input, Row, Col, Typography } from 'antd';
-import { SearchOutlined } from '@ant-design/icons';
+import { Input, Row, Col, Typography, Empty, Spin } from 'antd';
 import { useAppDispatch, useAppSelector } from '../../hooks/storeHooks';
 import { addToWatchlist } from '../../store/slices/watchlistSlice';
 import MovieCard from '../../components/MovieCard';
 import MainLayout from '../../components/Layout/MainLayout';
+import { searchMovies, type IMDBResult } from '../../services/imdbApi';
 
 const { Title } = Typography;
 const { Search } = Input;
 
-// Mock Data
-const MOCK_DATA = [
-  { tmdbId: 1, title: 'Inception', posterPath: 'https://image.tmdb.org/t/p/w500/9gk7adHYeDvHkCSEqAvQNLV5Uge.jpg', releaseYear: 2010, type: 'movie' as const, genreIds: [1, 2], status: 'planned' as const },
-  { tmdbId: 2, title: 'Interstellar', posterPath: 'https://image.tmdb.org/t/p/w500/gEU2QniL6E8ahDnMNatnZsUh8qU.jpg', releaseYear: 2014, type: 'movie' as const, genreIds: [1, 3], status: 'planned' as const },
-  { tmdbId: 3, title: 'Breaking Bad', posterPath: 'https://image.tmdb.org/t/p/w500/ggFHVNu6YYI5L9pCfOacjizRGt.jpg', releaseYear: 2008, type: 'series' as const, genreIds: [4, 5], status: 'planned' as const },
-  { tmdbId: 4, title: 'The Dark Knight', posterPath: 'https://image.tmdb.org/t/p/w500/qJ2tW6WMUDux911r6m7haRef0WH.jpg', releaseYear: 2008, type: 'movie' as const, genreIds: [1, 2], status: 'planned' as const },
-  { tmdbId: 5, title: 'Stranger Things', posterPath: 'https://image.tmdb.org/t/p/w500/49WJfeN0moxb9IPfGn8AIqMGskD.jpg', releaseYear: 2016, type: 'series' as const, genreIds: [4, 6], status: 'planned' as const },
-];
-
 const SearchPage: React.FC = () => {
   const dispatch = useAppDispatch();
   const watchlistItems = useAppSelector((state) => state.watchlist.items);
+  const [results, setResults] = useState<IMDBResult[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [searched, setSearched] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
 
-  const filteredData = MOCK_DATA.filter(item => 
-    item.title.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Debounce logic
+  React.useEffect(() => {
+    const delayDebounceFn = setTimeout(async () => {
+      if (searchTerm.trim()) {
+        setLoading(true);
+        setSearched(true);
+        const data = await searchMovies(searchTerm);
+        setResults(data);
+        setLoading(false);
+      } else {
+        setResults([]);
+        setSearched(false);
+      }
+    }, 1000); // 1000ms debounce
 
-  const handleAdd = (item: typeof MOCK_DATA[0]) => {
+    return () => clearTimeout(delayDebounceFn);
+  }, [searchTerm]);
+
+  const handleAdd = (item: IMDBResult) => {
     dispatch(addToWatchlist({
-      id: Math.random().toString(36).substr(2, 9), // Temp ID
-      tmdbId: item.tmdbId,
-      title: item.title,
-      posterPath: item.posterPath,
-      releaseYear: item.releaseYear,
-      type: item.type,
-      genreIds: item.genreIds,
+      id: Math.random().toString(36).substr(2, 9), // Temp ID until Firestore sync
+      imdbId: item['#IMDB_ID'],
+      title: item['#TITLE'],
+      posterPath: item['#IMG_POSTER'],
+      releaseYear: item['#YEAR'],
+      type: 'movie', // API doesn't distinguish, default to movie
       status: 'planned',
       updatedAt: Date.now(),
     }));
@@ -46,28 +53,44 @@ const SearchPage: React.FC = () => {
       <div style={{ maxWidth: 800, margin: '0 auto 30px' }}>
         <Title level={2} style={{ textAlign: 'center' }}>Discover Movies & Series</Title>
         <Search
-          placeholder="Search for movies or tv series..."
+          placeholder="Search for movies (e.g. Spiderman)..."
           allowClear
-          enterButton={<SearchOutlined />}
+          enterButton={false} // Removed button requirement
           size="large"
-          onChange={(e) => setSearchTerm(e.target.value)}
+          onChange={(e) => setSearchTerm(e.target.value)} // Update state on change
+          loading={loading}
         />
       </div>
 
-      <Row gutter={[16, 16]}>
-        {filteredData.map(item => {
-          const isInWatchlist = watchlistItems.some(w => w.tmdbId === item.tmdbId);
-          return (
-            <Col xs={12} sm={8} md={6} lg={4} key={item.tmdbId}>
-              <MovieCard 
-                item={item} 
-                isInWatchlist={isInWatchlist}
-                onAdd={() => handleAdd(item)}
-              />
-            </Col>
-          );
-        })}
-      </Row>
+      {loading ? (
+        <div style={{ textAlign: 'center', marginTop: 50 }}>
+          <Spin size="large" />
+        </div>
+      ) : results.length > 0 ? (
+        <Row gutter={[16, 16]}>
+          {results.map(item => {
+            const isInWatchlist = watchlistItems.some(w => w.imdbId === item['#IMDB_ID']);
+            console.log("item", item);
+            
+            return (
+              <Col xs={12} sm={8} md={6} lg={4} key={item['#IMDB_ID']}>
+                <MovieCard 
+                  item={{
+                    title: item['#TITLE'],
+                    posterPath: item['#IMG_POSTER'],
+                    releaseYear: item['#YEAR'],
+                    rating: 0 // API doesn't return rating in search
+                  }} 
+                  isInWatchlist={isInWatchlist}
+                  onAdd={() => handleAdd(item)}
+                />
+              </Col>
+            );
+          })}
+        </Row>
+      ) : searched ? (
+        <Empty description="No results found" />
+      ) :   <Title level={5} style={{ textAlign: 'center' }}>Please Search for movies or series...</Title>}
     </MainLayout>
   );
 };

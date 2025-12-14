@@ -11,6 +11,8 @@ node_modules
 .env
 package-lock.json
 dist
+.vite
+.firebase
 dist-ssr
 *.local
 
